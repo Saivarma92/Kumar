@@ -1,0 +1,76 @@
+def registry='https://saivarma1992.jfrog.io'
+pipeline {
+ agent any
+ environment {
+  PATH="/opt/maven/bin:$PATH"
+ } 
+ stages {
+   stage('git clone') {
+    steps {
+     git url:"https://github.com/Saivarma92/Kumar.git",branch:'main'
+    }
+   }  
+   satge('build') { 
+    steps { 
+     echo"<-----build started----->
+     sh 'mvn clean deploy -Dmaven.test.skip=true'
+     echo"<-----build complited----->
+    } 
+   }
+   stage('test') { 
+    steps { 
+     echo"<-----unit test started----->
+     sh 'mvn surefire-report:report'
+     echo"<-----unit test complited----->
+    }
+   }
+ 
+   stage('sonarQube analysis') {
+    environment {
+     scannerHome=tool'Sonar-Qube-Scanner'
+    }
+    steps {
+     withSonarQubeEnv('Sonar-Qube-Server') {
+      sh"${scannerHome}/bin sonar-scanner"
+     }
+    }    
+   }
+   stage('Quality Gate') {
+    Steps {
+     script {
+      timeout(time: 1,unit: 'Hours') {
+       def qg=waitForQualityGate()
+       if (qg.status != 'ok') {
+        error "pipeline aborted due to quality gate failure: ${qg.status}"
+       }
+      }
+     }
+    }
+   }
+   stage('Jar Publish') {
+    steps {
+     scrit {
+      echo'<-----Jar Published started----->'
+      def server=Artfactory.newServer url: registry + "/artifactory", credentialsId: "artifact-cred" 
+      def properties="buildid=${env.BUILD_ID},commitid=${GIT_COMMIT}"
+      def uploadSpec="""{
+         "files": [
+           {
+            "pattern": "jarstaging/(*)",
+            "target": "sai-libs-release-local/{1}",
+            "flat": "false",
+            "props":"${proprities}",
+            "exclusions": ["$*sha1", "*.md5"]
+           }
+          ]
+       """
+      }
+      def buildInfo=server.upload(uploadSpec)
+      buildInfo.env.collect()
+      server.publishBuildInfo(buildInfo)
+      echo '<-----Jar Published Ended----->'
+     }
+    }
+  }
+ } 
+}
